@@ -1,0 +1,86 @@
+name: Publish v2.0 at 2026-08-31 06:00 KST
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/schedule-v2-release.yml"
+  schedule:
+    - cron: "55 20 30 8 *"
+
+permissions:
+  contents: write
+
+jobs:
+  hide-release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Change v.2.0 to draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/378520927" \
+            --data '{"draft":true}')"
+          test "$(jq -r '.draft' <<<"$response")" = "true"
+
+  publish-release:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait until 06:00 KST
+        run: |
+          set -euo pipefail
+          target_epoch="$(date -u -d '2026-08-30T21:00:00Z' +%s)"
+          now_epoch="$(date -u +%s)"
+          if (( now_epoch > target_epoch + 86400 )); then
+            echo "This one-time schedule has expired."
+            exit 1
+          fi
+          if (( now_epoch < target_epoch )); then
+            sleep "$((target_epoch - now_epoch))"
+          fi
+
+      - name: Publish v.2.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/378520927" \
+            --data '{"draft":false}')"
+          test "$(jq -r '.draft' <<<"$response")" = "false"
+
+      - name: Remove one-time workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          api_url="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/schedule-v2-release.yml"
+          file_json="$(curl --fail-with-body --silent --show-error \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$api_url?ref=main")"
+          file_sha="$(jq -r '.sha' <<<"$file_json")"
+          payload="$(jq -n --arg sha "$file_sha" \
+            '{message:"Remove completed v2.0 release schedule",sha:$sha,branch:"main"}')"
+          curl --fail-with-body --silent --show-error \
+            --request DELETE \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$api_url" \
+            --data "$payload" >/dev/null
