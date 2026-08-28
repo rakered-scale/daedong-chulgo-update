@@ -13,23 +13,34 @@ permissions:
   contents: write
 
 jobs:
-  hide-release:
+  update-draft:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Change v.2.0 to draft
+      - name: Update v.2.0 notes and keep it draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          body="$(cat <<'PATCH_NOTES'
+          ### 대동 - 출GO v2.0
+
+          - `.xlsx` 및 `.xlsm` 파일 지원
+          - 프로그램 내 품목 정보 관리 기능 추가
+          - 라벨 수량을 원본 발주서 K열에 저장
+          - 자동 업데이트 안정화 및 EXE 위치 변경 문제 수정
+          PATCH_NOTES
+          )"
+          payload="$(jq -n --arg body "$body" '{draft:true,body:$body}')"
           response="$(curl --fail-with-body --silent --show-error \
             --request PATCH \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/378520927" \
-            --data '{"draft":true}')"
+            --data "$payload")"
           test "$(jq -r '.draft' <<<"$response")" = "true"
+          test "$(jq -r '.body' <<<"$response")" = "$body"
 
   publish-release:
     if: github.event_name == 'schedule'
